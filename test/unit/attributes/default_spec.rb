@@ -1,6 +1,8 @@
 require 'minitest/autorun'
+require 'chef/resource'
 require 'chef/node'
 require 'chef/platform'
+require 'chef/dsl'
 
 describe 'User::Attributes::Default' do
   let(:attr_ns) { 'user' }
@@ -82,6 +84,10 @@ describe 'User::Attributes::Default' do
   describe "for all platforms" do
     it "sets default manage home" do
       @node[attr_ns]['manage_home'].must_equal "true"
+    end
+
+    it "sets default non unique" do
+      @node[attr_ns]['non_unique'].must_equal "false"
     end
 
     it "sets default create user group" do

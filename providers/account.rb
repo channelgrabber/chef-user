@@ -24,6 +24,7 @@ def load_current_resource
     "#{node['user']['home_root']}/#{new_resource.username}"
   @my_shell = new_resource.shell || node['user']['default_shell']
   @manage_home = bool(new_resource.manage_home, node['user']['manage_home'])
+  @non_unique = bool(new_resource.non_unique, node['user']['non_unique'])
   @create_group = bool(new_resource.create_group, node['user']['create_group'])
   @ssh_keygen = bool(new_resource.ssh_keygen, node['user']['ssh_keygen'])
 end
@@ -36,10 +37,9 @@ action :create do
 end
 
 action :remove do
+  # Removing a user will also remove all the other file based resources.
+  # By only removing the user it will make this action idempotent.
   next unless system("id #{new_resource.username}")
-  keygen_resource           :delete
-  authorized_keys_resource  :delete
-  dir_resource              :delete
   user_resource             :remove
 end
 
@@ -90,9 +90,17 @@ end
 
 def user_resource(exec_action)
   # avoid variable scoping issues in resource block
-  my_home, my_shell, manage_home = @my_home, @my_shell, @manage_home
+  my_home, my_shell, manage_home, non_unique = @my_home, @my_shell, @manage_home, @non_unique
+
+  r = directory ::File.dirname(my_home) do
+    recursive true
+    action    :nothing
+  end
+  r.run_action(:create) unless exec_action == :delete
+  new_resource.updated_by_last_action(true) if r.updated_by_last_action?
 
   user_already_existed = system("id #{new_resource.username}")
+
   r = user new_resource.username do
     comment   new_resource.comment  if new_resource.comment
     uid       new_resource.uid      if new_resource.uid
@@ -101,7 +109,7 @@ def user_resource(exec_action)
     shell     my_shell              if my_shell
     password  new_resource.password if new_resource.password
     system    new_resource.system_user
-    supports  :manage_home => manage_home
+    supports  :manage_home => manage_home, :non_unique => non_unique
     action    :nothing
   end
   r.run_action(exec_action)
@@ -121,7 +129,7 @@ def dir_resource(exec_action)
     r = directory dir do
       owner       new_resource.username
       group       Etc.getpwnam(new_resource.username).gid
-      mode        dir =~ %r{/\.ssh$} ? '0700' : '2755'
+      mode        dir =~ %r{/\.ssh$} ? '0700' : node['user']['home_dir_mode']
       recursive   true
       action      :nothing
     end
@@ -141,7 +149,8 @@ def authorized_keys_resource(exec_action)
     group       Etc.getpwnam(new_resource.username).gid
     mode        '0600'
     variables   :user     => new_resource.username,
-                :ssh_keys => ssh_keys
+                :ssh_keys => ssh_keys,
+                :fqdn     => node['fqdn']
     action      :nothing
   end
   r.run_action(exec_action)
